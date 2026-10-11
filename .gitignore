@@ -1,0 +1,25 @@
+# environment
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# working notes and internal result records (not public)
+RESULTS.md
+NEXT.md
+
+# downloaded PDB corpus: 532 MB, regenerate with scripts/fetch_pdb_peptides.py
+raw_pdb/
+
+# outputs are working data -- ignore everything, then re-admit the small
+# trained model so the repo can be cloned and used without retraining
+outputs/*
+!outputs/inverse/
+outputs/inverse/*
+!outputs/inverse/inverse.pt
+
+# project-specific analyses and models trained on private data
+docs/mmgbsa.md
+scripts/mmgbsa_descriptors.py
+scripts/mmgbsa_regress.py
+scripts/predict_dg.py
