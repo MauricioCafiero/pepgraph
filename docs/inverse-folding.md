@@ -99,8 +99,9 @@ If a sequence–structure compatibility model says a backbone does not want its
 own sequence, that is evidence about the **fold**, not the model. Two things in
 this project turn that into a real measurement:
 
-**Five fold lanes for the same sequences.** ESMFold apo, OpenFold3 ± ligand,
-RosettaFold3 ± ligand, and Boltz co-fold. Scoring the same sequence on each
+**Six fold lanes for the same sequences.** ESMFold apo, OpenFold3 ± ligand,
+RosettaFold3 ± ligand, Boltz co-fold and Boltz apo — the last being the model
+that produced the co-folds, asked for the sequence alone. Scoring the same sequence on each
 lane's backbone asks which lane produces geometry that actually wants the
 sequence it was given — a comparison that currently costs a dock-and-simulate
 cycle per lane.
@@ -237,46 +238,81 @@ it is cheap: seconds per structure against a dock-and-simulate cycle.
 
 ### All lanes, all peptides (`compare_lanes.py`)
 
-181 structures, 20 shuffles each. Reported as **perplexity** (effective number
+202 structures, 20 shuffles each. Reported as **perplexity** (effective number
 of residue types the model is choosing between; 21 = no information) and **z**
 (same backbone, sequence shuffled -- isolates whether the backbone cares about
 residue *order* rather than composition).
 
-**Paired on the 21 sequences present in all five fold lanes**, so no lane can
-look good by holding easier peptides:
+**Paired on the 21 sequences present in all six fold lanes**, so no lane can
+look good by holding easier peptides. Apo lanes and co-folded lanes are kept
+apart: an apo lane was never given the ligand these designs are built around,
+so a mixed ranking invites comparisons across a boundary the lanes do not
+share.
 
-| lane | median perplexity | mean z | best-of-lane wins |
-|---|---|---|---|
-| **openfold3** (ligand) | **9.1** | +3.6 | **12 / 21** |
-| rf3 (ligand) | 11.9 | +4.2 | 3 |
-| of3apo | 12.0 | +3.4 | 3 |
-| rf3apo | 13.9 | +3.6 | 2 |
-| esmfold | 16.1 | +1.8 | 1 |
+| | lane | median perplexity | mean z | best-of-lane wins |
+|---|---|---|---|---|
+| **apo** | of3apo | 12.0 | +3.3 | 3 |
+| | rf3apo | 13.9 | +3.9 | 1 |
+| | boltzapo | 14.6 | +3.3 | 1 |
+| | esmfold | 16.1 | +1.6 | 1 |
+| **co-folded** | **openfold3** (ligand) | **9.1** | +4.1 | **12 / 21** |
+| | rf3 (ligand) | 11.9 | +4.2 | 3 |
 
 uniform = 21.0, PDB held-out = 13.5
 
-**Boltz paired per lane** (13 shared sequences; Boltz has different coverage so
-it is excluded from the five-lane set above):
+`z` is not reproducible to the digit: the 20 shuffles come off one RNG stream
+consumed in structure order, so adding a lane re-draws every later structure's
+shuffles and moves z by a few tenths. Perplexity and the geometry columns are
+deterministic. Use `--lanes` to score a new lane without disturbing the rest.
 
-| lane | lane px | boltz px | diff | sigma |
+**The Boltz lane is four lanes.** Its 76 structures are the design pipeline's
+hint sweep: each sequence co-folded with the top 4, 8 or 12 contacts of its
+placed pose forced, and once with none. Those are four different structures per
+sequence, not repeats -- within one sequence the variants span up to 26
+perplexity (`ox3_orig_control` 34.0 against `ox3_orig_f4` 8.0) at Rg 13.3
+against 6.9. Classification is by the realised constraint count in each yaml:
+F4 and F8 exact, F12 realising 9-12 because the hint generator only hints
+contacts the pose already makes.
+
+| sublane | n | mean px | median px | mean z |
 |---|---|---|---|---|
-| **openfold3** | **11.4** | 14.3 | **+2.9** | **+3.2** |
-| of3apo | 13.4 | 14.3 | +0.9 | +1.1 |
-| rf3 | 13.8 | 14.3 | +0.5 | +0.4 |
-| rf3apo | 17.9 | 14.3 | -3.6 | -2.1 |
-| esmfold | 26.6 | 14.3 | -12.3 | -3.3 |
+| boltz F12 | 20 | **14.7** | 13.9 | +2.9 |
+| boltz F4 | 18 | 14.9 | 15.2 | +2.8 |
+| boltz F8 | 18 | 15.5 | 15.6 | +3.0 |
+| boltz control | 20 | 16.5 | 16.1 | +2.6 |
 
-**Three findings.**
+Boltz is excluded from the six-lane paired set above because the eight BoltzGen
+arms have no Boltz co-fold -- BoltzGen generated its own sequence per candidate
+and those were never submitted to Boltz -- leaving 13 shared sequences, 9 of
+them with hinted folds:
 
-**OpenFold3 with ligand is the best lane**, beating Boltz -- the current primary
-co-fold lane -- by +3.2 sigma.
+| comparison | n | openfold3 px | boltz px | diff | sigma |
+|---|---|---|---|---|---|
+| vs boltz F4 | 9 | 10.7 | 13.5 | +2.9 | +2.2 |
+| vs boltz F12 | 9 | 10.7 | 13.9 | +3.3 | **+3.0** |
+| vs boltz F8 | 9 | 10.7 | 14.5 | +3.8 | **+4.1** |
+| vs boltz control | 13 | 11.4 | 15.7 | +4.3 | **+2.0** |
+
+**Four findings.**
+
+**OpenFold3 with ligand is the best lane**, beating every Boltz sublane --
+Boltz being the current primary co-fold lane -- by +2.2 to +4.3 perplexity.
+
+**For Boltz, the hints decide the lane.** F12 14.7, F4 14.9, F8 15.5, control
+16.5: forcing contacts is worth ~1.8 perplexity at best, and the unhinted
+control is the weakest co-folded lane here. The effect is in the tail -- 3 of
+the 6 Boltz structures above the uniform 21 are controls -- while the best
+hinted folds (`ox3_orig_f4` 8.0, `orig_f4` 8.9) beat OpenFold3's lane mean. Read
+it as hinted-versus-not rather than a dose-response: F8 scores worse than F4
+despite carrying twice the constraints.
 
 **Ligand-bound beats apo.** Paired on identical sequences: openfold3 vs of3apo
 is +1.4 perplexity at **+3.6 sigma** (15/21 sequences), rf3 vs rf3apo is +2.6 at
 +1.7 sigma (13/21). Same direction, firm for OF3, suggestive for RF3.
 
-**ESMFold fails systematically, with one clean mechanism.** Of the 8 structures
-in 181 with z <= 0, **7 are ESMFold and 6 of those have exactly zero contacts**
+**ESMFold fails systematically, with one clean mechanism.** Of the 11
+structures in 202 with z <= 0, **7 are ESMFold and 6 of those have exactly zero
+contacts**
 (Rg 19-28 A) -- extended chains, not folds. ESMFold is apo-only and these are
 ligand-dependent designs, so it has nothing to fold around; a coherent
 explanation rather than a defect.
@@ -289,7 +325,11 @@ explanation rather than a defect.
   0.52), so scoring better than the experimental band partly reflects helices
   being easy to recognise. The **lane** comparison is unaffected, being paired
   on identical sequences.
-- n = 13-21 throughout.
+- n = 9-21 throughout.
+- Boltz apo, the originating model asked without its ligand, puts three
+  structures above the uniform 21 (`ox2_shuffle` 36.0, `orig_f12` 31.3,
+  `ox1_orig_f12` 24.2) -- backbones that fit their own sequence worse than a
+  uniform guess, and the same arms that lane folds extended.
 - It cannot validate a design: scrambled sequences that are then folded score
   just as well (see above).
 

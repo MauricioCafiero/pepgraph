@@ -35,7 +35,7 @@ peptide is good. See [docs/inverse-folding.md](docs/inverse-folding.md).
 | target | verdict |
 |---|---|
 | **Inverse folding** | message passing adds **18–30%** recovery over a local-geometry-only baseline |
-| **Fold-pipeline ranking** | co-folded with ligand beats apo; one pipeline failed on 7/21 peptides, emitting extended chains |
+| **Fold-pipeline ranking** | co-folded with ligand beats apo; forced contact hints decide the Boltz lane; one pipeline failed on 7/21 peptides, emitting extended chains |
 | Angle denoising | graph adds only **1–4%** over a geometry-free Ramachandran prior |
 | Intra-peptide contact prediction | deterministic from torsions (F1 = 0.801 analytically); nothing to learn |
 
