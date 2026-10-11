@@ -28,7 +28,7 @@ from pepgraph.inverse import InverseMPNN, sequence_log_prob  # noqa: E402
 from pepgraph.residues import THREE_TO_ONE  # noqa: E402
 from pepgraph.structure import read_structure  # noqa: E402
 
-LANES = ["esmfold", "of3apo", "openfold3", "rf3", "rf3apo"]
+LANES = ["esmfold", "of3apo", "openfold3", "rf3", "rf3apo", "boltzapo"]
 UNIFORM = 21.0
 
 
@@ -56,20 +56,25 @@ def load(path):
     return coords, seq, res_list
 
 
-def collect(runs):
+def collect(runs, lanes=None):
     """(lane, design_name, ligand, path) for every fold-lane structure."""
     found = []
+    want = set(lanes) if lanes else None
     # each immediate subdirectory of --runs is one target/system
     systems = sorted(d.name for d in runs.iterdir()
                      if d.is_dir() and (d / "folds").is_dir() or
                      (d.is_dir() and (d / "boltz").is_dir()))
     for lig in systems:
         for lane in LANES:
+            if want and lane not in want:
+                continue
             d = runs / lig / "folds" / lane
             if not d.is_dir():
                 continue
             for p in sorted(list(d.glob("*.pdb")) + list(d.glob("*.cif"))):
                 found.append((lane, p.stem, lig, p))
+        if want and "boltz" not in want:
+            continue
         for p in sorted((runs / lig / "boltz").glob(
                 "boltz_results_*/predictions/*/*_model_0.cif")):
             found.append(("boltz", p.parent.name, lig, p))
@@ -84,6 +89,10 @@ def main():
     ap.add_argument("--n-shuffles", type=int, default=20)
     ap.add_argument("--device", default="cpu", choices=["cpu", "mps", "cuda"])
     ap.add_argument("--cutoff", type=float, default=8.0)
+    ap.add_argument("--lanes", nargs="+", metavar="LANE",
+                    help="score only these lanes (default: all of them). Scoring one new lane "
+                         "this way leaves the other lanes' rows alone -- a full run re-draws "
+                         "every structure's shuffles, which moves z by a few tenths everywhere")
     ap.add_argument("--out", type=Path,
                     default=Path("outputs/inverse/lane_comparison.json"))
     args = ap.parse_args()
@@ -101,7 +110,7 @@ def main():
         if r:
             band = float(np.exp(-r["mean"]))
 
-    found = collect(args.runs)
+    found = collect(args.runs, args.lanes)
     print(f"{len(found)} structures across {len(set(l for l, *_ in found))} lanes")
 
     rng = np.random.default_rng(0)
@@ -161,10 +170,11 @@ def main():
     seq_lanes = defaultdict(dict)
     for r in rows:
         seq_lanes[r["sequence"]].setdefault(r["lane"], []).append(r)
-    complete = [s for s, d in seq_lanes.items() if all(l in d for l in LANES)]
+    scored = [l for l in LANES if not args.lanes or l in args.lanes]
+    complete = [s for s, d in seq_lanes.items() if all(l in d for l in scored)]
     print("\n" + "=" * 84)
     print(f"PAIRED COMPARISON -- {len(complete)} sequences present in all "
-          f"{len(LANES)} fold lanes")
+          f"{len(scored)} fold lanes")
     print("=" * 84)
     if complete:
         print(f"{'lane':<12}{'median px':>11}{'mean px':>10}{'mean z':>9}"
@@ -172,11 +182,11 @@ def main():
         print("-" * 84)
         wins = defaultdict(int)
         for s in complete:
-            best = min(LANES, key=lambda l: np.mean(
+            best = min(scored, key=lambda l: np.mean(
                 [r["perplexity"] for r in seq_lanes[s][l]]))
             wins[best] += 1
         stats = []
-        for lane in LANES:
+        for lane in scored:
             px = np.array([np.mean([r["perplexity"] for r in seq_lanes[s][lane]])
                            for s in complete])
             z = np.array([np.mean([r["z"] for r in seq_lanes[s][lane]])
